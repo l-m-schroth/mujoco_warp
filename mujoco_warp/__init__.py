@@ -15,6 +15,27 @@
 
 """Public API for MJWarp."""
 
+# ---------------------------------------------------------------------------
+# MuJoCo-C compatible global callbacks
+#
+# MuJoCo exposes global callback function pointers like mjcb_control. In MuJoCo-C
+# these are invoked from mj_forward/mj_step (and at each RK stage) just before
+# actuation and applied forces are needed.
+#
+# We mirror this behavior in mujoco_warp by providing a global Python callback
+# with the same name and signature: (model, data) -> None.
+# ---------------------------------------------------------------------------
+
+# User-defined control callback (MuJoCo-C: mjcb_control).
+# Signature: callback(model: mujoco_warp.Model, data: mujoco_warp.Data) -> None
+mjcb_control = None
+
+
+def mj_resetCallbacks() -> None:
+    """Reset mujoco_warp callbacks to defaults (MuJoCo-C: mj_resetCallbacks)."""
+    global mjcb_control
+    mjcb_control = None
+
 # isort: off
 from ._src.forward import step as step
 from ._src.types import Model as Model

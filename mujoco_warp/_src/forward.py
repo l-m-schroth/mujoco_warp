@@ -924,6 +924,13 @@ def forward(m: Model, d: Data):
     if m.sensor_e_kinetic == 0:  # not computed by sensor
       sensor.energy_vel(m, d)
 
+  # MuJoCo-C compatible control callback (mjcb_control). Match MuJoCo-C behavior:
+  # call from forward dynamics only when actuation is enabled.
+  import mujoco_warp  # local import to avoid circular imports at module init
+
+  if mujoco_warp.mjcb_control is not None and not (m.opt.disableflags & DisableBit.ACTUATION):
+    mujoco_warp.mjcb_control(m, d)
+
   fwd_actuation(m, d)
   fwd_acceleration(m, d, factorize=True)
 
@@ -970,6 +977,13 @@ def step1(m: Model, d: Data):
   if energy:
     if m.sensor_e_kinetic == 0:  # not computed by sensor
       sensor.energy_vel(m, d)
+
+  # MuJoCo-C compatible control callback (mjcb_control). Match MuJoCo-C behavior:
+  # step1 calls the callback unconditionally when installed.
+  import mujoco_warp  # local import to avoid circular imports at module init
+
+  if mujoco_warp.mjcb_control is not None:
+    mujoco_warp.mjcb_control(m, d)
 
 
 @event_scope
