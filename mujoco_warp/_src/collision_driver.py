@@ -718,7 +718,10 @@ def collision(m: Model, d: Data):
   # zero contact and collision counters
   wp.launch(_zero_nacon_ncollision, dim=1, outputs=[d.nacon, d.ncollision])
 
-  if d.naconmax == 0 or m.opt.disableflags & (DisableBit.CONSTRAINT | DisableBit.CONTACT):
+  # Match MuJoCo-C semantics: DisableBit.CONTACT disables contact *constraints*,
+  # but collision detection can still run to populate contact points/normals
+  # for sensors or user-defined force laws (e.g. via mjcb_control).
+  if d.naconmax == 0 or m.opt.disableflags & DisableBit.CONSTRAINT:
     return
 
   if m.opt.broadphase == BroadphaseType.NXN:
