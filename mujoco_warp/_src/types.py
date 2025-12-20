@@ -675,6 +675,8 @@ class Option:
       zeros out the contacts at each step)
     contact_sensor_maxmatch: max number of contacts considered by contact sensor matching criteria
                              contacts matched after this value is exceded will be ignored
+    picard_iterations: number of Picard iterations per forward call (>= 1)
+    picard_beta: relaxation factor (0..1) for mjcb_postsolve force updates
   """
 
   timestep: array("*", float)
@@ -707,6 +709,8 @@ class Option:
   graph_conditional: bool
   run_collision_detection: bool
   contact_sensor_maxmatch: int
+  picard_iterations: int
+  picard_beta: float
 
 
 @dataclasses.dataclass

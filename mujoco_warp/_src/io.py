@@ -180,6 +180,22 @@ def put_model(mjm: mujoco.MjModel) -> types.Model:
   else:
     opt.contact_sensor_maxmatch = 64
 
+  # Picard loop options (MJWarp extension).
+  # Defaults: 1 iteration (disabled) and beta=1 (no relaxation).
+  picard_iterations_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_NUMERIC, "picard_iterations")
+  if picard_iterations_id > -1:
+    opt.picard_iterations = int(mjm.numeric_data[mjm.numeric_adr[picard_iterations_id]])
+  else:
+    opt.picard_iterations = 1
+  opt.picard_iterations = max(1, int(opt.picard_iterations))
+
+  picard_beta_id = mujoco.mj_name2id(mjm, mujoco.mjtObj.mjOBJ_NUMERIC, "picard_beta")
+  if picard_beta_id > -1:
+    opt.picard_beta = float(mjm.numeric_data[mjm.numeric_adr[picard_beta_id]])
+  else:
+    opt.picard_beta = 1.0
+  opt.picard_beta = float(np.clip(opt.picard_beta, 0.0, 1.0))
+
   # place opt on device
   for f in dataclasses.fields(types.Option):
     if isinstance(f.type, wp.array):

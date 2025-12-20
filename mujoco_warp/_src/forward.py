@@ -880,6 +880,34 @@ def _qfrc_smooth(
   )
 
 
+@wp.kernel
+def _blend_qfrc_applied(
+  # In:
+  beta: float,
+  qfrc_prev_in: wp.array2d(dtype=float),
+  # In/Out:
+  qfrc_applied_io: wp.array2d(dtype=float),
+):
+  worldid, dofid = wp.tid()
+  qfrc_applied_io[worldid, dofid] = (1.0 - beta) * qfrc_prev_in[worldid, dofid] + beta * qfrc_applied_io[worldid, dofid]
+
+
+@wp.kernel
+def _blend_xfrc_applied(
+  # In:
+  beta: float,
+  xfrc_prev_in: wp.array2d(dtype=wp.spatial_vector),
+  # In/Out:
+  xfrc_applied_io: wp.array2d(dtype=wp.spatial_vector),
+):
+  worldid, bodyid = wp.tid()
+  x_prev = xfrc_prev_in[worldid, bodyid]
+  x_curr = xfrc_applied_io[worldid, bodyid]
+  top = (1.0 - beta) * wp.spatial_top(x_prev) + beta * wp.spatial_top(x_curr)
+  bottom = (1.0 - beta) * wp.spatial_bottom(x_prev) + beta * wp.spatial_bottom(x_curr)
+  xfrc_applied_io[worldid, bodyid] = wp.spatial_vector(top, bottom)
+
+
 @event_scope
 def fwd_acceleration(m: Model, d: Data, factorize: bool = False):
   """Add up all non-constraint forces, compute qacc_smooth.
@@ -932,9 +960,48 @@ def forward(m: Model, d: Data):
     mujoco_warp.mjcb_control(m, d)
 
   fwd_actuation(m, d)
-  fwd_acceleration(m, d, factorize=True)
+  # MJWarp extension: optional Picard loop to couple post-solve force updates
+  # (e.g. tire models depending on contact normals) with the constraint solver.
+  postsolve_cb = getattr(mujoco_warp, "mjcb_postsolve", None)
+  picard_iterations = int(getattr(m.opt, "picard_iterations", 1) or 1)
+  picard_iterations = max(1, picard_iterations)
+  if postsolve_cb is None:
+    picard_iterations = 1
 
-  solver.solve(m, d)
+  beta = float(getattr(m.opt, "picard_beta", 1.0) if postsolve_cb is not None else 1.0)
+  beta = float(max(0.0, min(beta, 1.0)))
+  do_relax = (postsolve_cb is not None) and (beta != 1.0)
+  qfrc_prev = wp.empty_like(d.qfrc_applied) if do_relax else None
+  xfrc_prev = wp.empty_like(d.xfrc_applied) if do_relax else None
+
+  for it in range(picard_iterations):
+    if it > 0 and not (m.opt.disableflags & DisableBit.WARMSTART):
+      wp.copy(d.qacc_warmstart, d.qacc)
+
+    fwd_acceleration(m, d, factorize=(it == 0))
+    solver.solve(m, d)
+
+    if postsolve_cb is not None:
+      if do_relax:
+        wp.copy(qfrc_prev, d.qfrc_applied)
+        wp.copy(xfrc_prev, d.xfrc_applied)
+
+      postsolve_cb(m, d)
+
+      if do_relax:
+        wp.launch(
+          _blend_qfrc_applied,
+          dim=(d.nworld, m.nv),
+          inputs=[beta, qfrc_prev],
+          outputs=[d.qfrc_applied],
+        )
+        wp.launch(
+          _blend_xfrc_applied,
+          dim=(d.nworld, m.nbody),
+          inputs=[beta, xfrc_prev],
+          outputs=[d.xfrc_applied],
+        )
+
   sensor.sensor_acc(m, d)
 
 
@@ -990,8 +1057,48 @@ def step1(m: Model, d: Data):
 def step2(m: Model, d: Data):
   """Advance simulation in two phases: after input is set by user."""
   fwd_actuation(m, d)
-  fwd_acceleration(m, d)
-  solver.solve(m, d)
+  import mujoco_warp  # local import to avoid circular imports at module init
+
+  postsolve_cb = getattr(mujoco_warp, "mjcb_postsolve", None)
+  picard_iterations = int(getattr(m.opt, "picard_iterations", 1) or 1)
+  picard_iterations = max(1, picard_iterations)
+  if postsolve_cb is None:
+    picard_iterations = 1
+
+  beta = float(getattr(m.opt, "picard_beta", 1.0) if postsolve_cb is not None else 1.0)
+  beta = float(max(0.0, min(beta, 1.0)))
+  do_relax = (postsolve_cb is not None) and (beta != 1.0)
+  qfrc_prev = wp.empty_like(d.qfrc_applied) if do_relax else None
+  xfrc_prev = wp.empty_like(d.xfrc_applied) if do_relax else None
+
+  for it in range(picard_iterations):
+    if it > 0 and not (m.opt.disableflags & DisableBit.WARMSTART):
+      wp.copy(d.qacc_warmstart, d.qacc)
+
+    fwd_acceleration(m, d)
+    solver.solve(m, d)
+
+    if postsolve_cb is not None:
+      if do_relax:
+        wp.copy(qfrc_prev, d.qfrc_applied)
+        wp.copy(xfrc_prev, d.xfrc_applied)
+
+      postsolve_cb(m, d)
+
+      if do_relax:
+        wp.launch(
+          _blend_qfrc_applied,
+          dim=(d.nworld, m.nv),
+          inputs=[beta, qfrc_prev],
+          outputs=[d.qfrc_applied],
+        )
+        wp.launch(
+          _blend_xfrc_applied,
+          dim=(d.nworld, m.nbody),
+          inputs=[beta, xfrc_prev],
+          outputs=[d.xfrc_applied],
+        )
+
   sensor.sensor_acc(m, d)
   # TODO(team): mj_checkAcc
 

@@ -30,11 +30,19 @@
 # Signature: callback(model: mujoco_warp.Model, data: mujoco_warp.Data) -> None
 mjcb_control = None
 
+# User-defined post-solve callback (MJWarp extension).
+# Called after the constraint solver in forward dynamics (and after each Picard iteration, if enabled).
+# Signature: callback(model: mujoco_warp.Model, data: mujoco_warp.Data) -> None
+#
+# Intended for force laws that depend on solved contact forces (e.g. tire models using normal load).
+mjcb_postsolve = None
+
 
 def mj_resetCallbacks() -> None:
     """Reset mujoco_warp callbacks to defaults (MuJoCo-C: mj_resetCallbacks)."""
-    global mjcb_control
+    global mjcb_control, mjcb_postsolve
     mjcb_control = None
+    mjcb_postsolve = None
 
 # isort: off
 from ._src.forward import step as step
